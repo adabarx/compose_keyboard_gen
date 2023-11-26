@@ -1,0 +1,17 @@
+{{ block "jobs" .}}
+<div>
+    <h1>Keyboard Generation</h1>
+    
+    <h3>Workers</h3>
+    
+    {{ block "server-jobs" .}}
+    <ul id="server-list">
+        {{ range .hosts }}
+            <li>{{ .Hostname }} - {{ .Status }}</li>
+        {{ else }}
+            <li>What is a composer without an orchestra?</li>
+        {{ end }}
+    </ul>
+    {{ end }}
+</div>
+{{ end }}

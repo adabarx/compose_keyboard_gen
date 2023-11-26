@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTMX & Go - Demo</title>
+    <script src="https://unpkg.com/htmx.org@1.9.2" integrity="sha384-L6OqL9pRWyyFU3+/bjdSri+iIphTN/bvYyM37tICVyOJkWZLpP2vGn6VUEXgzg6h" crossorigin="anonymous"></script>
+
+</head>
+<body>
+    <div>
+        <h1>Keyboard Generation</h1>
+    
+        <h3>Workers</h3>
+
+        <form hx-post="/add-server/" hx-target="#server-list">
+            <div>
+                <label for="host">Host</label>
+                <input type="text" name="host" id="host" />
+            </div>
+            <button type="submit">Add Worker</button>
+        </form>
+        {{ block "server-status" .}}
+        <ul id="server-list">
+            {{ range .hosts }}
+                <li>{{ . }}</li>
+            {{ else }}
+                <li>What is a composer without an orchestra?</li>
+            {{ end }}
+        </ul>
+        {{ end }}
+
+        <h3>Start Job</h3>
+
+        <form hx-post="/start-job/" hx-boost="true">
+            <div>
+                <label for="job-name">Job Name</label>
+                <input type="text" name="job-name" id="job-name" />
+            </div>
+            <div>
+                <label for="total">Total Keyboards Generated</label>
+                <input type="text" name="total" id="total" />
+            </div>
+        </form>
+    </div>
+</body>
+</html>
