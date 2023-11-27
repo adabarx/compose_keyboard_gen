@@ -19,9 +19,39 @@ import (
 )
 
 type StartJobReq struct {
-	batch_size int
-	job_name string
+	BatchSize int `json:"batch_size"`
+	JobName string `json:"job_name"`
 }
+
+type Resp struct {
+	Init *InitResp `json:"Init"`
+	InProgress *InProgressResp `json:"InProgress"`
+	BatchComplete *BatchCompleteResp `json:"BatchComplete"`
+}
+
+type InitResp struct {
+	Message string `json:"message"`
+}
+
+type InProgressResp struct {
+	Message string `json:"message"`
+	Batch_size int `json:"batch_size"`
+	Completed int `json:"completed"`
+}
+
+type BatchCompleteResp struct {
+	Message string `json:"message"`
+	Keyboards Keyboards `json:"keyboards"`
+}
+
+type Keyboards []struct {
+	Score float64 `json:"score"`
+	Keys [47]struct {
+		Lower rune `json:"lower"`
+		Upper rune `json:"upper"`
+	} `json:"keys"`
+}
+
 
 type UpdateRespSuccess struct {
 	Success any
@@ -35,18 +65,23 @@ type UpdateRespInProc struct {
 	BatchInProgress any
 }
 
+type Worker struct {
+	Completed int
+}
+
 type AppState struct {
 	mu sync.Mutex
-	hosts map[int]string
+	Hosts map[string]Worker
 	job_name string
 	running bool
 	total int
 	batch_size int
 	remaining int
+	keyboards Keyboards
 }
 
 type AppSyncCopy struct {
-	hosts map[int]string
+	Hosts map[string]Worker
 	job_name string
 	running bool
 	total int
@@ -56,7 +91,7 @@ type AppSyncCopy struct {
 
 func (a *AppState) sync_clone()  AppSyncCopy {
 	return AppSyncCopy {
-		hosts: a.hosts,
+		Hosts: a.Hosts,
 		job_name: a.job_name,
 		running: a.running,
 		total: a.total,
@@ -65,25 +100,15 @@ func (a *AppState) sync_clone()  AppSyncCopy {
 	}
 }
 
-func decode_resp(resp *http.Response) (string, error) {
-	var nb UpdateRespInit
-	var ip UpdateRespInProc
-	var su UpdateRespSuccess
-
-	// TODO: there has to be a better way.
-	err := json.NewDecoder(resp.Body).Decode(&nb)
+func decode_resp(resp *http.Response) (Resp, error) {
+	// decode resp as a map (only the key is needed)
+	var parsedResp Resp
+	err := json.NewDecoder(resp.Body).Decode(&parsedResp)
 	if err != nil {
-		err := json.NewDecoder(resp.Body).Decode(&ip)
-		if err != nil {
-			err := json.NewDecoder(resp.Body).Decode(&su)
-			if err != nil {
-				return "", err
-			}
-			return "success", nil
-		}
-		return "in progress", nil
+		log.Print(err)
+		return Resp{}, err
 	}
-	return "available", nil
+	return parsedResp, nil
 } 
 
 func start_worker(app *AppState, host string) {
@@ -100,30 +125,31 @@ func start_worker(app *AppState, host string) {
 			log.Print(err)
 			return
 		}
-		if status == "in progress" {
+		if status.InProgress != nil {
 			time.Sleep(time.Second * 5)
 			continue
 		}
-		if status == "success" {
-			// gather data
-		}
 
 		app.mu.Lock()
+		if status.BatchComplete != nil {
+			app.Hosts[host] = Worker{Completed: app.Hosts[host].Completed + 1}
+			app.keyboards = append(app.keyboards, status.BatchComplete.Keyboards...)
+		}
 		if app.remaining == 0 {
 			app.mu.Unlock()
 			log.Print("Job Done, exiting thread")
 			return
 		}
 		body := StartJobReq {
-			batch_size: 0,
-			job_name: app.job_name,
+			BatchSize: 0,
+			JobName: app.job_name,
 		}
 		if app.batch_size > app.remaining {
-			body.batch_size = app.remaining
+			body.BatchSize = app.remaining
 		} else {
-			body.batch_size = app.batch_size
+			body.BatchSize = app.batch_size
 		}
-		app.remaining -= body.batch_size
+		app.remaining -= body.BatchSize
 		app.mu.Unlock()
 
 		bodyBytes, err := json.Marshal(&body)
@@ -145,7 +171,7 @@ func main() {
 	}
 
 	app := AppState {
-		hosts: make(map[int]string),
+		Hosts: make(map[string]Worker),
 		job_name: "",
 		running: false,
 		total: 0,
@@ -154,6 +180,7 @@ func main() {
 	}
 
 	root := func (w http.ResponseWriter, r *http.Request) {
+		log.Print("Root")
 		app.mu.Lock()
 		defer app.mu.Unlock()
 
@@ -162,6 +189,7 @@ func main() {
 	}
 
 	add_server := func (w http.ResponseWriter, r *http.Request) {
+		log.Print("Add Server")
 		app.mu.Lock()
 		defer app.mu.Unlock()
 
@@ -169,12 +197,13 @@ func main() {
 
 		// check if host works
 
-		app.hosts[len(app.hosts)] = host
-		tmpl := template.Must(template.ParseFiles("index.html"))
+		app.Hosts[host] = Worker{Completed: 0}
+		tmpl := template.Must(template.ParseFiles("fragments.html"))
 		tmpl.ExecuteTemplate(w, "server-status", app.sync_clone())
 	}
 
 	start_job := func (w http.ResponseWriter, r *http.Request) {
+		log.Print("Start Job")
 		app.mu.Lock()
 		defer app.mu.Unlock()
 
@@ -189,16 +218,19 @@ func main() {
 		app.batch_size = int(math.Round(math.Sqrt(float64(total))))
 		app.remaining = total
 
+		log.Print("before threads")
 		// TODO: spawn go routines to start and manage each worker
-		for _, host := range app.hosts {
+		for host := range app.Hosts {
 			go start_worker(&app, host)
 		}
 
 		tmpl := template.Must(template.ParseFiles("job.html"))
 		tmpl.Execute(w, app.sync_clone())
+		log.Print("after template")
 	}
 
 	update_current_job := func (w http.ResponseWriter, r *http.Request) {
+		log.Print("Update")
 		app.mu.Lock()
 		defer app.mu.Unlock()
 
@@ -218,7 +250,7 @@ func main() {
 		}
 		fmt.Printf("results: %v\n", results)
 
-		tmpl := template.Must(template.ParseFiles("index.html"))
+		tmpl := template.Must(template.ParseFiles("fragments.html"))
 		tmpl.ExecuteTemplate(w, "job-status", app.sync_clone()) // map of server jobs
 	}
 

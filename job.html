@@ -1,17 +1,11 @@
-{{ block "jobs" .}}
 <div>
     <h1>Keyboard Generation</h1>
     
     <h3>Workers</h3>
     
-    {{ block "server-jobs" .}}
-    <ul id="server-list">
-        {{ range .hosts }}
-            <li>{{ .Hostname }} - {{ .Status }}</li>
-        {{ else }}
-            <li>What is a composer without an orchestra?</li>
+    <ul hx-get="/update" hx-trigger="every 2s" hx-swap="outerHTML">
+        {{ range $h, $w := .hosts }}
+        <li>{{ $h }} - {{ $w.CurrRemaining}}/{{ $w.CurrBatch }}</li>
         {{ end }}
     </ul>
-    {{ end }}
 </div>
-{{ end }}

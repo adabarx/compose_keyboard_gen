@@ -1,0 +1,19 @@
+
+{{ block "server-status" .}}
+<ul id="server-list">
+    {{ range $i, $h := .Hosts }}
+        <li>{{ $h }}</li>
+    {{ else }}
+        <li>What is a composer without an orchestra?</li>
+    {{ end }}
+</ul>
+{{ end }}
+
+{{ block "job-status" .}}
+    <ul hx-get="/update" hx-trigger="every 2s" hx-swap="outerHTML">
+        {{ range $h, $w := .hosts }}
+        <li>{{ $h }} - {{ $w.CurrRemaining}}/{{ $w.CurrBatch }}</li>
+        {{ end }}
+    </ul>
+{{ end }}
+
