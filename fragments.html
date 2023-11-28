@@ -1,8 +1,8 @@
 
 {{ block "server-status" .}}
-<ul id="server-list">
-    {{ range $i, $h := .Hosts }}
-        <li>{{ $h }}</li>
+<ul id="server-list" hx-get="/update" hx-trigger="every 2s" hx-swap="outerHTML">
+    {{ range $h, $w := .Hosts }}
+    <li>{{ $h }} {{ $w }}</li>
     {{ else }}
         <li>What is a composer without an orchestra?</li>
     {{ end }}

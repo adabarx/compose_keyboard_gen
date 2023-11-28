@@ -22,7 +22,7 @@
             <button type="submit">Add Worker</button>
         </form>
 
-        <ul id="server-list">
+        <ul id="server-list" hx-get="/update" hx-trigger="every 2s" hx-swap="outerHTML">
             {{ range $h, $w := .Hosts }}
             <li>{{ $h }} {{ $w }}</li>
             {{ else }}
@@ -32,7 +32,7 @@
 
         <h3>Start Job</h3>
 
-        <form hx-post="/start-job" hx-target="#root" hx-swap="outerHTML">
+        <form hx-post="/start-job" hx-target="#server-list" hx-swap="outerHTML">
             <div>
                 <label for="job-name">Job Name</label>
                 <input type="text" name="job-name" id="job-name" />
@@ -44,6 +44,9 @@
             <button type="submit">Start Job</button>
         </form>
     </div>
+    <br>
+    <br>
+    <img src="https://htmx.org/img/createdwith.jpeg" alt="hypermedia is my passion" height="90">
 </body>
 </html>
 

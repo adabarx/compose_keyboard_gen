@@ -52,19 +52,6 @@ type Keyboards []struct {
 	} `json:"keys"`
 }
 
-
-type UpdateRespSuccess struct {
-	Success any
-}
-
-type UpdateRespInit struct {
-	NoBatch any
-}
-
-type UpdateRespInProc struct {
-	BatchInProgress any
-}
-
 type Worker struct {
 	Completed int
 }
@@ -195,7 +182,7 @@ func main() {
 
 		host := r.PostFormValue("host")
 
-		// check if host works
+		// TODO: check if host works
 
 		app.Hosts[host] = Worker{Completed: 0}
 		tmpl := template.Must(template.ParseFiles("fragments.html"))
@@ -224,13 +211,20 @@ func main() {
 			go start_worker(&app, host)
 		}
 
-		tmpl := template.Must(template.ParseFiles("job.html"))
-		tmpl.Execute(w, app.sync_clone())
+		tmpl := template.Must(template.ParseFiles("fragments.html"))
+		tmpl.ExecuteTemplate(w, "server-status", app.sync_clone())
 		log.Print("after template")
 	}
 
+	update := func (w http.ResponseWriter, r *http.Request) {
+		app.mu.Lock()
+		defer app.mu.Unlock()
+
+		tmpl := template.Must(template.ParseFiles("fragments.html"))
+		tmpl.ExecuteTemplate(w, "server-status", app.sync_clone())
+	}
+
 	update_current_job := func (w http.ResponseWriter, r *http.Request) {
-		log.Print("Update")
 		app.mu.Lock()
 		defer app.mu.Unlock()
 
@@ -257,6 +251,7 @@ func main() {
 	http.HandleFunc("/", root)
 	http.HandleFunc("/add-server", add_server)
 	http.HandleFunc("/start-job", start_job)
+	http.HandleFunc("/update", update)
 	http.HandleFunc("/update-job", update_current_job)
 
 	log.Fatal(http.ListenAndServe(":8000", nil))
