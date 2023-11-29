@@ -3,16 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"html/template"
 	"log"
-	"math"
-	"net/http"
 	"os"
 	"strconv"
 	"sync"
 	"time"
+	"html/template"
+	"encoding/json"
+	"net/http"
 
 	"github.com/influxdata/influxdb-client-go/v2"
 	"github.com/joho/godotenv"
@@ -20,6 +19,8 @@ import (
 
 type StartJobReq struct {
 	BatchSize int `json:"batch_size"`
+	BatchNum int `json:"batch_number"`
+	Device string `json:"device_name"`
 	JobName string `json:"job_name"`
 }
 
@@ -56,12 +57,26 @@ type Worker struct {
 	Completed int
 }
 
+type KeyboardProcessInfo struct {
+	prep time.Time
+	start time.Time
+	end time.Time
+	generations []GenerationProcessInfo
+}
+
+type GenerationProcessInfo struct {
+	id int
+	start time.Time
+	sort time.Time
+	end time.Time
+}
+
 type AppState struct {
 	mu sync.Mutex
 	Hosts map[string]Worker
 	job_name string
 	running bool
-	total int
+	batches int
 	batch_size int
 	remaining int
 	keyboards Keyboards
@@ -71,9 +86,10 @@ type AppSyncCopy struct {
 	Hosts map[string]Worker
 	job_name string
 	running bool
-	total int
+	batches int
 	batch_size int
 	remaining int
+	keyboards Keyboards
 }
 
 func (a *AppState) sync_clone()  AppSyncCopy {
@@ -81,9 +97,10 @@ func (a *AppState) sync_clone()  AppSyncCopy {
 		Hosts: a.Hosts,
 		job_name: a.job_name,
 		running: a.running,
-		total: a.total,
+		batches: a.batches,
 		batch_size: a.batch_size,
 		remaining: a.remaining,
+		keyboards: a.keyboards,
 	}
 }
 
@@ -100,6 +117,7 @@ func decode_resp(resp *http.Response) (Resp, error) {
 
 func start_worker(app *AppState, host string) {
 	client := &http.Client{}
+	batch_num := 0
 	
 	for {
 		resp, err := client.Get(host + "/update")
@@ -119,6 +137,7 @@ func start_worker(app *AppState, host string) {
 
 		app.mu.Lock()
 		if status.BatchComplete != nil {
+			batch_num += 1
 			app.Hosts[host] = Worker{Completed: app.Hosts[host].Completed + 1}
 			app.keyboards = append(app.keyboards, status.BatchComplete.Keyboards...)
 		}
@@ -128,15 +147,12 @@ func start_worker(app *AppState, host string) {
 			return
 		}
 		body := StartJobReq {
-			BatchSize: 0,
+			BatchSize: app.batch_size,
+			BatchNum: batch_num,
+			Device: host,
 			JobName: app.job_name,
 		}
-		if app.batch_size > app.remaining {
-			body.BatchSize = app.remaining
-		} else {
-			body.BatchSize = app.batch_size
-		}
-		app.remaining -= body.BatchSize
+		app.remaining -= 1
 		app.mu.Unlock()
 
 		bodyBytes, err := json.Marshal(&body)
@@ -161,7 +177,7 @@ func main() {
 		Hosts: make(map[string]Worker),
 		job_name: "",
 		running: false,
-		total: 0,
+		batches: 0,
 		batch_size: 0,
 		remaining: 0,
 	}
@@ -185,43 +201,46 @@ func main() {
 		// TODO: check if host works
 
 		app.Hosts[host] = Worker{Completed: 0}
-		tmpl := template.Must(template.ParseFiles("fragments.html"))
-		tmpl.ExecuteTemplate(w, "server-status", app.sync_clone())
+		tmpl := template.Must(template.ParseFiles("index.html"))
+		tmpl.ExecuteTemplate(w, "status", app.sync_clone())
 	}
 
 	start_job := func (w http.ResponseWriter, r *http.Request) {
-		log.Print("Start Job")
 		app.mu.Lock()
 		defer app.mu.Unlock()
 
 		job_name := r.PostFormValue("job-name")
-		total, err := strconv.Atoi(r.PostFormValue("total"))
+		batch_size, err := strconv.Atoi(r.PostFormValue("batch-size"))
 		if err != nil {
-			// TODO: return error html
-			log.Print("need a number")
+			tmpl := template.Must(template.ParseFiles("fragments.html"))
+			tmpl.ExecuteTemplate(w, "error", err) 
+			return
+		}
+		batches, err := strconv.Atoi(r.PostFormValue("batches"))
+		if err != nil {
+			tmpl := template.Must(template.ParseFiles("fragments.html"))
+			tmpl.ExecuteTemplate(w, "error", err) 
+			return
 		}
 		app.job_name = job_name
-		app.total = total
-		app.batch_size = int(math.Round(math.Sqrt(float64(total))))
-		app.remaining = total
+		app.batches = batches
+		app.batch_size = batch_size
+		app.remaining = batches
 
-		log.Print("before threads")
-		// TODO: spawn go routines to start and manage each worker
 		for host := range app.Hosts {
 			go start_worker(&app, host)
 		}
 
-		tmpl := template.Must(template.ParseFiles("fragments.html"))
-		tmpl.ExecuteTemplate(w, "server-status", app.sync_clone())
-		log.Print("after template")
+		tmpl := template.Must(template.ParseFiles("index.html"))
+		tmpl.ExecuteTemplate(w, "status", app.sync_clone())
 	}
 
 	update := func (w http.ResponseWriter, r *http.Request) {
 		app.mu.Lock()
 		defer app.mu.Unlock()
 
-		tmpl := template.Must(template.ParseFiles("fragments.html"))
-		tmpl.ExecuteTemplate(w, "server-status", app.sync_clone())
+		tmpl := template.Must(template.ParseFiles("index.html"))
+		tmpl.ExecuteTemplate(w, "status", app.sync_clone())
 	}
 
 	update_current_job := func (w http.ResponseWriter, r *http.Request) {
@@ -233,19 +252,65 @@ func main() {
 		org := os.Getenv("ORG")
 
 		client := influxdb2.NewClient(url, key)
+		defer client.Close()
+
 		api := client.QueryAPI(org)
+
 		query := fmt.Sprintf(`from(bucket:"keyboard_gen")
-			|> filter(fn: (r) => r._measurement == "%s")`,
+			|> range(start: -1d)
+			|> filter(fn: (r) => r._measurement == "%s")
+			|> filter(fn: (r) => r._field == "keyboard status")`,
 			app.job_name,
 		)
-		results, err := api.Query(context.Background(), query)
+		result, err := api.Query(context.Background(), query)
 		if err != nil {
-			log.Print("error querying influx")
+			log.Print(err)
+			return
 		}
-		fmt.Printf("results: %v\n", results)
+		if result.Err() != nil {
+		    log.Print(fmt.Sprintf("query parsing error: %s\n", result.Err().Error()))
+		}
+		count_start := make(map[string]int)
+		count_end := make(map[string]int)
+		for result.Next() {
+			log.Print(result.Record().Values())
+			curr_dev := result.Record().Values()["device"].(string)
+			if _, ok := count_start[curr_dev]; ok == false {
+				count_start[curr_dev] = 0
+			}
+			if _, ok := count_end[curr_dev]; ok == false {
+				count_end[curr_dev] = 0
+			}
+			status := result.Record().Values()["_value"]
+			if status != nil {
+				if status == "start" {
+					count_start[curr_dev] += 1
+				} else if status == "end" {
+					count_end[curr_dev] += 1
+				}
+			}
+		}
+		if len(count_start) > 0 {
+			log.Print("")
+			log.Print("keyboards started")
+			for k, v := range count_start {
+				if v > 0 {
+					log.Print("key: " + k + " val: " + strconv.Itoa(v))
+				}
+			}
+		}
+		if len(count_end) > 0 {
+			log.Print("")
+			log.Print("keyboards ended")
+			for k, v := range count_end {
+				if v > 0 {
+					log.Print("key: " + k + " val: " + strconv.Itoa(v))
+				}
+			}
+		}
 
-		tmpl := template.Must(template.ParseFiles("fragments.html"))
-		tmpl.ExecuteTemplate(w, "job-status", app.sync_clone()) // map of server jobs
+		tmpl := template.Must(template.ParseFiles("index.html"))
+		tmpl.ExecuteTemplate(w, "status", app.sync_clone())
 	}
 
 	http.HandleFunc("/", root)

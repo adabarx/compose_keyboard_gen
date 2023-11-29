@@ -14,35 +14,45 @@
     
         <h3>Workers</h3>
 
-        <form hx-post="/add-server" hx-target="#server-list" hx-swap="outerHTML">
+        <form hx-post="/add-server" hx-target="#workers" hx-swap="outerHTML">
             <div>
                 <label for="host">Host</label>
                 <input type="text" name="host" id="host" />
             </div>
+            <br>
             <button type="submit">Add Worker</button>
         </form>
 
-        <ul id="server-list" hx-get="/update" hx-trigger="every 2s" hx-swap="outerHTML">
+        <h3>Start Job</h3>
+
+        <form hx-post="/start-job" hx-target="#workers" hx-swap="outerHTML">
+            <div>
+                <label for="job-name">Job Name</label>
+                <input type="text" name="job-name" id="job-name" />
+            </div>
+            <div>
+                <label for="batch-size">Batch Size</label>
+                <input type="number" name="batch-size" id="batch-size" />
+            </div>
+            <div>
+                <label for="batches">Batches</label>
+                <input type="number" name="batches" id="batches" />
+            </div>
+            <br>
+            <button type="submit">Start Job</button>
+        </form>
+
+        <h3>Status</h3>
+
+        {{ block "status" .}}
+        <ul id="workers" hx-get="/update-job" hx-trigger="every 3s" hx-swap="outerHTML">
             {{ range $h, $w := .Hosts }}
             <li>{{ $h }} {{ $w }}</li>
             {{ else }}
                 <li>What is a composer without an orchestra?</li>
             {{ end }}
         </ul>
-
-        <h3>Start Job</h3>
-
-        <form hx-post="/start-job" hx-target="#server-list" hx-swap="outerHTML">
-            <div>
-                <label for="job-name">Job Name</label>
-                <input type="text" name="job-name" id="job-name" />
-            </div>
-            <div>
-                <label for="total">Total Keyboards Generated</label>
-                <input type="number" name="total" id="total" />
-            </div>
-            <button type="submit">Start Job</button>
-        </form>
+        {{ end }}
     </div>
     <br>
     <br>

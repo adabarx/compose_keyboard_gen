@@ -1,5 +1,5 @@
 
-{{ block "server-status" .}}
+{{ define "server-status" }}
 <ul id="server-list" hx-get="/update" hx-trigger="every 2s" hx-swap="outerHTML">
     {{ range $h, $w := .Hosts }}
     <li>{{ $h }} {{ $w }}</li>
@@ -9,11 +9,15 @@
 </ul>
 {{ end }}
 
-{{ block "job-status" .}}
+{{ define "influx-info" }}
     <ul hx-get="/update" hx-trigger="every 2s" hx-swap="outerHTML">
         {{ range $h, $w := .hosts }}
         <li>{{ $h }} - {{ $w.CurrRemaining}}/{{ $w.CurrBatch }}</li>
         {{ end }}
     </ul>
+{{ end }}
+
+{{ define "error" }}
+<p>ERROR: {{ . }}</p>
 {{ end }}
 
